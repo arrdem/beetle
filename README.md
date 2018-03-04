@@ -1,19 +1,11 @@
 # beetle
 <img align="right" src="/etc/beetle.jpg" width=300/>
 
-[![Clojars Project](https://img.shields.io/clojars/v/me.arrdem/lein-git-version.svg)](https://clojars.org/me.arrdem/beetle)
+[![Clojars Project](https://img.shields.io/clojars/v/me.arrdem/beetle.svg)](https://clojars.org/me.arrdem/beetle)
 
-> FIXME: quotation maybe?
-
-**TL;DR** FIXME
-
-## Manifesto
-
-FIXME
-
-## Documentation
-
-- [Index](/docs/index.md)
+**TL;DR** Tools for writing crawlers.
+Very alpha.
+Incidental to other projects.
 
 ## License
 
