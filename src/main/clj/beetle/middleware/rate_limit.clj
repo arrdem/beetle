@@ -44,7 +44,7 @@
   to domains which do not already have a listed rate limit."
   [client]
   (fn [{:keys [server-name] :as req}]
-    (let [gates (when *rate-limits*
+    (when-let [gates (when *rate-limits*
                   (swap! *rate-limits* get-or-create-rate-limit
                          (reverse (str/split server-name #"\."))))]
       (when-let [gate (server-name->rate-limit gates server-name)]

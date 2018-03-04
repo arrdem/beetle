@@ -2,7 +2,8 @@
   "A clj-http middleware for maintaining a somewhat RFC compliant response cache."
   {:authors ["Reid \"arrdem\" McKenzie <me@arrdem.com>"],
    :license "https://www.eclipse.org/legal/epl-v10.html"}
-  (:require [clj-http.client :as http]
+  (:require [beetle.middleware.rate-limit :refer [*rate-limits*]]
+            [clj-http.client :as http]
             [clojure.java.io :as io]
             [clojure.tools.logging :as log]
             [pandect.algo.sha256 :as sha]
@@ -48,42 +49,38 @@
   If the response is successful (2xx) and is a GET, store the response in the cache.
   Return the response."
   [cache-rooot client req]
-   (let [method  (or (:method req) (:request-method req))
-         cache-f (req->f cache-rooot req)]
-     (if (and (= :get method)
-              (:cache req true)
-              (.exists cache-f))
-       (do (log/infof "Cache hit on %s%s?%s" (:server-name req) (:uri req) (:query-string req))
-           ;; The cache ignores URL parameters and some other stuff.  The correct "real browser"
-           ;; behavior is to issue a request to the server, and only hit in the cache if the server
-           ;; says to by returning a 304 response.
-           (if (<= (- (System/currentTimeMillis)
-                      (.lastModified cache-f))
-                   (* 60 1000))
-             (do (log/info "Cache for this request is under a minute old, forcing a hit")
-                 (nippy/thaw-from-file cache-f))
+  (let [method  (or (:method req) (:request-method req))
+        cache-f (req->f cache-rooot req)]
+    (if (and (= :get method)
+             (:cache req true)
+             (.exists cache-f))
+      (do (log/infof "Cache hit on %s%s?%s" (:server-name req) (:uri req) (:query-string req))
+          ;; The cache ignores URL parameters and some other stuff.  The correct "real browser"
+          ;; behavior is to issue a request to the server, and only hit in the cache if the server
+          ;; says to by returning a 304 response.
+          (let [date (if-modified-since-date cache-f)
+                _    (log/infof "Checking to see if resource has changed since '%s'" date)
+                req* (update req :headers merge
+                                     {"if-modified-since" date
+                                      "cache-control"     "max-age=120"})
+                resp (binding [*rate-limits* nil]
+                       (client req*))]
+            (if (= 304 (:status resp))
+              (do (log/info "Server responded 304 unchanged")
+                  (nippy/thaw-from-file cache-f))
 
-             (let [date (if-modified-since-date cache-f)
-                   _    (log/infof "Checking to see if resource has changed since '%s'" date)
-                   resp (client (update req :headers merge
-                                        {"if-modified-since" date
-                                         "cache-control"     "max-age=120"}))]
-               (if (= 304 (:status resp))
-                 (do (log/info "Server responded 304 unchanged")
-                     (nippy/thaw-from-file cache-f))
+              (let [resp (update resp :body slurp-bytes)]
+                (if (http/success? resp)
+                  (nippy/freeze-to-file cache-f resp))
 
-                 (let [resp (update resp :body slurp-bytes)]
-                   (if (http/success? resp)
-                     (nippy/freeze-to-file cache-f resp))
-
-                   (log/infof "Server returned %s changed for %s%s" (:status resp)
-                              (:server-name req) (:uri req))
-                   resp)))))
-       (do (log/infof "Cache miss on %s%s?%s" (:server-name req) (:uri req) (:query-string req))
-           (let [resp (update (client req) :body slurp-bytes)]
-             (when (and (http/success? resp) (= :get method))
-               (nippy/freeze-to-file cache-f resp))
-             resp)))))
+                (log/infof "Server returned %s changed for %s%s" (:status resp)
+                           (:server-name req) (:uri req))
+                resp))))
+      (do (log/infof "Cache miss on %s%s?%s" (:server-name req) (:uri req) (:query-string req))
+          (let [resp (update (client req) :body slurp-bytes)]
+            (when (and (http/success? resp) (= :get method))
+              (nippy/freeze-to-file cache-f resp))
+            resp)))))
 
 (defn ->caching-middleware
   "Middleware construtor.
